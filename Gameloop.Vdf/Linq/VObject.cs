@@ -1,283 +1,239 @@
 ﻿using Gameloop.Vdf.Utilities;
-using System;
-using System.Collections.Generic;
+using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Dynamic;
-using System.Linq;
 using System.Linq.Expressions;
 
-namespace Gameloop.Vdf.Linq
+namespace Gameloop.Vdf.Linq;
+
+public class VObject() : VToken, IList<VToken>, IDictionary<string, VToken>
 {
-    public class VObject : VToken, IList<VToken>, IDictionary<string, VToken>
+    private readonly List<VToken> _children = [];
+
+    public VObject(VObject other) : this()
     {
-        private readonly List<VToken> _children;
+        _children.AddRange(other._children.Select(x => x.DeepClone()));
+        for (int i = 0; i < _children.Count; i++) SetPointers(_children[i], i);
+    }
 
-        public VObject()
+    private void SetPointers(VToken token, int index)
+    {
+        token.Parent = this;
+        token.Previous = (index > 0) ? _children[index - 1] : null;
+        token.Next = (index < _children.Count - 1) ? _children[index + 1] : null;
+
+        token.Previous?.Next = token;
+        token.Next?.Previous = token;
+    }
+
+    private static void ClearPointers(VToken token)
+    {
+        token.Previous?.Next = token.Next;
+        token.Next?.Previous = token.Previous;
+
+        token.Parent = null;
+        token.Previous = null;
+        token.Next = null;
+    }
+
+    public override VTokenType Type => VTokenType.Object;
+    public int Count => _children.Count;
+    public bool IsReadOnly => false;
+
+    public override VToken? this[object key]
+    {
+        get
         {
-            _children = new List<VToken>();
+            ArgumentNullException.ThrowIfNull(key);
+            return key is string name ? this[name] : throw new ArgumentException("Property name expected.", nameof(key));
         }
-
-        public VObject(VObject other)
+        set
         {
-            _children = other._children.Select(x => x.DeepClone()).ToList();
+            ArgumentNullException.ThrowIfNull(key);
+            if (key is string name) this[name] = value;
+            else throw new ArgumentException("Property name expected.", nameof(key));
         }
+    }
 
-        public override VTokenType Type => VTokenType.Object;
-
-        public int Count => _children.Count;
-
-        public override VToken? this[object key]
+    public VToken this[int index]
+    {
+        get => _children[index];
+        set
         {
-            get
-            {
-                ValidationUtils.ArgumentNotNull(key, nameof(key));
-
-                if (!(key is string propertyName))
-                    throw new ArgumentException($"Accessed JObject values with invalid key value: {MiscellaneousUtils.ToString(key)}. Object property name expected.");
-
-                return this[propertyName];
-            }
-
-            set
-            {
-                ValidationUtils.ArgumentNotNull(key, nameof(key));
-
-                if (!(key is string propertyName))
-                    throw new ArgumentException($"Set JObject values with invalid key value: {MiscellaneousUtils.ToString(key)}. Object property name expected.");
-
-                this[propertyName] = value;
-            }
+            ClearPointers(_children[index]);
+            _children[index] = value;
+            SetPointers(value, index);
         }
+    }
 
-        public VToken this[int index]
+    public VToken? this[string key]
+    {
+        get => TryGetValue(key, out var result) ? result : null;
+        set
         {
-            get => _children[index];
-            set => _children[index] = value;
+            var prop = Properties().FirstOrDefault(x => x.Key == key);
+            VToken valueToSet = (value is VProperty p && p.Key == key) ? p.Value : (value ?? VValue.CreateEmpty());
+            if (prop != null)
+                prop.Value = valueToSet;
+            else
+                Add(key, valueToSet);
         }
+    }
 
-        public VToken? this[string key]
+    public override IEnumerable<VToken> Children() => _children;
+    public IEnumerable<VProperty> Properties() => _children.OfType<VProperty>();
+
+    public void Add(string key, VToken value) => Add(new VProperty(key, value));
+
+    public void Add(VProperty property)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        ArgumentNullException.ThrowIfNull(property.Value);
+        Add((VToken)property);
+    }
+
+    public void Add(VToken token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        _children.Add(token);
+        SetPointers(token, _children.Count - 1);
+    }
+
+    public void Insert(int index, VToken item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        _children.Insert(index, item);
+        for (int i = Math.Max(0, index - 1); i <= Math.Min(_children.Count - 1, index + 1); i++)
+            SetPointers(_children[i], i);
+    }
+
+    public bool Remove(VToken item)
+    {
+        int index = _children.IndexOf(item);
+        if (index == -1) return false;
+        RemoveAt(index);
+        return true;
+    }
+
+    public void RemoveAt(int index)
+    {
+        VToken token = _children[index];
+        _children.RemoveAt(index);
+        ClearPointers(token);
+        if (index < _children.Count) SetPointers(_children[index], index);
+    }
+
+    public void Clear()
+    {
+        foreach (var child in _children) ClearPointers(child);
+        _children.Clear();
+    }
+
+    public bool TryGetValue(string key, [MaybeNullWhen(false)] out VToken value)
+    {
+        value = Properties().FirstOrDefault(x => x.Key == key)?.Value;
+        return value != null;
+    }
+
+    public override void WriteTo(VdfWriter writer)
+    {
+        writer.WriteObjectStart();
+        foreach (var child in _children) child.WriteTo(writer);
+        writer.WriteObjectEnd();
+    }
+
+    ICollection<string> IDictionary<string, VToken>.Keys =>
+        [.. Properties().Select(x => x.Key)];
+
+    ICollection<VToken> IDictionary<string, VToken>.Values =>
+        [.. Properties().Select(x => x.Value)];
+
+    VToken IDictionary<string, VToken>.this[string key]
+    {
+        get => this[key] ?? throw new KeyNotFoundException($"The key '{key}' was not found in the VObject.");
+        set => this[key] = value ?? throw new ArgumentNullException(nameof(value), "VDF values cannot be null.");
+    }
+
+    IEnumerator<VToken> IEnumerable<VToken>.GetEnumerator() => _children.GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => _children.GetEnumerator();
+
+    IEnumerator<KeyValuePair<string, VToken>> IEnumerable<KeyValuePair<string, VToken>>.GetEnumerator()
+    {
+        foreach (VProperty property in Properties())
+            yield return new KeyValuePair<string, VToken>(property.Key, property.Value);
+    }
+
+    void ICollection<KeyValuePair<string, VToken>>.Add(KeyValuePair<string, VToken> item) => Add(item.Key, item.Value);
+    bool ICollection<KeyValuePair<string, VToken>>.Contains(KeyValuePair<string, VToken> item)
+        => TryGetValue(item.Key, out var v) && v == item.Value;
+
+    void ICollection<KeyValuePair<string, VToken>>.CopyTo(KeyValuePair<string, VToken>[] array, int index)
+    {
+        ArgumentNullException.ThrowIfNull(array);
+        List<KeyValuePair<string, VToken>> kvps = [.. Properties().Select(p => new KeyValuePair<string, VToken>(p.Key, p.Value))];
+        kvps.CopyTo(array, index);
+    }
+
+    bool ICollection<KeyValuePair<string, VToken>>.Remove(KeyValuePair<string, VToken> item)
+        => ((ICollection<KeyValuePair<string, VToken>>)this).Contains(item) && Remove(item.Key);
+
+    public bool Contains(VToken item) => _children.Contains(item);
+    public bool ContainsKey(string key) => Properties().Any(x => x.Key == key);
+    public void CopyTo(VToken[] array, int arrayIndex) => _children.CopyTo(array, arrayIndex);
+    public override VToken DeepClone() => new VObject(this);
+    public int IndexOf(VToken item) => _children.IndexOf(item);
+    public bool Remove(string key) => _children.RemoveAll(x => x is VProperty p && p.Key == key) > 0;
+
+    protected override bool DeepEquals(VToken token)
+    {
+        if (token is not VObject other || _children.Count != other._children.Count) return false;
+
+        return _children.SequenceEqual(other._children, VToken.EqualityComparer);
+    }
+
+    protected override DynamicMetaObject GetMetaObject(Expression parameter)
+        => new DynamicProxyMetaObject<VObject>(parameter, this, new VObjectDynamicProxy());
+
+    private class VObjectDynamicProxy : DynamicProxy<VObject>
+    {
+       public override bool TryGetMember(VObject instance, GetMemberBinder binder, out object? result)
         {
-            get
-            {
-                if (!TryGetValue(key, out VToken? result))
-                    return null;
+            VToken? token = instance[binder.Name];
 
-                return result;
-            }
+            if (token is VProperty prop)
+                result = prop.Value;
+            else
+                result = token;
 
-            set
-            {
-                VProperty prop = Properties().FirstOrDefault(x => x.Key == key);
-                if (prop != null)
-                    prop.Value = value ?? VValue.CreateEmpty();
-                else
-                    Add(key, value ?? VValue.CreateEmpty());
-            }
-        }
-
-        public bool IsReadOnly => false;
-
-        ICollection<string> IDictionary<string, VToken>.Keys => Properties().Select(x => x.Key).ToList();
-
-        ICollection<VToken> IDictionary<string, VToken>.Values => throw new NotImplementedException();
-
-        public override IEnumerable<VToken> Children()
-        {
-            return _children;
-        }
-
-        public IEnumerable<VProperty> Properties()
-        {
-            return _children.Where(x => x is VProperty).OfType<VProperty>();
-        }
-
-        public void Add(string key, VToken value)
-        {
-            Add(new VProperty(key, value));
-        }
-
-        public void Add(VProperty property)
-        {
-            if (property == null)
-                throw new ArgumentNullException(nameof(property));
-            if (property.Value == null)
-                throw new ArgumentNullException(nameof(property.Value));
-
-            _children.Add(property);
-        }
-
-        public void Add(VToken token)
-        {
-            if (token == null)
-                throw new ArgumentNullException(nameof(token));
-
-            _children.Add(token);
-        }
-
-        public void Clear()
-        {
-            _children.Clear();
-        }
-
-        public bool Contains(VToken item)
-        {
-            return _children.Contains(item);
-        }
-
-        public bool ContainsKey(string key)
-        {
-            return Properties().Any(x => x.Key == key);
-        }
-
-        public void CopyTo(VToken[] array, int arrayIndex)
-        {
-            _children.CopyTo(array, arrayIndex);
-        }
-
-        public override VToken DeepClone()
-        {
-            return new VObject(this);
-        }
-
-        public int IndexOf(VToken item)
-        {
-            return _children.IndexOf(item);
-        }
-
-        public void Insert(int index, VToken item)
-        {
-            _children.Insert(index, item);
-        }
-
-        public bool Remove(string key)
-        {
-            return _children.RemoveAll(x => x is VProperty p && p.Key == key) != 0;
-        }
-
-        public bool Remove(VToken item)
-        {
-            return _children.Remove(item);
-        }
-
-        public void RemoveAt(int index)
-        {
-            _children.RemoveAt(index);
-        }
-
-        public bool TryGetValue(string key, [MaybeNullWhen(false)] out VToken value)
-        {
-            value = Properties().FirstOrDefault(x => x.Key == key)?.Value;
-            return (value != null);
-        }
-
-        public override void WriteTo(VdfWriter writer)
-        {
-            writer.WriteObjectStart();
-
-            foreach (VToken child in _children)
-                child.WriteTo(writer);
-
-            writer.WriteObjectEnd();
-        }
-
-        #region ICollection<KeyValuePair<string,JToken>> Members
-
-        public IEnumerator<KeyValuePair<string, VToken>> GetEnumerator()
-        {
-            foreach (VProperty property in Properties())
-                yield return new KeyValuePair<string, VToken>(property.Key, property.Value);
-        }
-
-        VToken IDictionary<string, VToken>.this[string key]
-        {
-            get => this[key] ?? throw new KeyNotFoundException();
-            set => this[key] = value ?? throw new ArgumentNullException(nameof(value));
-        }
-
-        void ICollection<KeyValuePair<string, VToken>>.Add(KeyValuePair<string, VToken> item)
-        {
-            Add(new VProperty(item.Key, item.Value));
-        }
-
-        void ICollection<KeyValuePair<string, VToken>>.Clear()
-        {
-            _children.Clear();
-        }
-
-        bool ICollection<KeyValuePair<string, VToken>>.Contains(KeyValuePair<string, VToken> item)
-        {
-            VProperty property = Properties().FirstOrDefault(x => x.Key == item.Key);
-            if (property == null)
-                return false;
-
-            return (property.Value == item.Value);
-        }
-
-        void ICollection<KeyValuePair<string, VToken>>.CopyTo(KeyValuePair<string, VToken>[] array, int arrayIndex)
-        {
-            if (array == null)
-                throw new ArgumentNullException(nameof(array));
-            if (arrayIndex < 0)
-                throw new ArgumentOutOfRangeException(nameof(arrayIndex), "arrayIndex is less than 0.");
-            if (arrayIndex >= array.Length && arrayIndex != 0)
-                throw new ArgumentException("arrayIndex is equal to or greater than the length of array.");
-            if (Count > array.Length - arrayIndex)
-                throw new ArgumentException("The number of elements in the source JObject is greater than the available space from arrayIndex to the end of the destination array.");
-
-            int index = 0;
-            foreach (VProperty property in Properties())
-                array[arrayIndex + index++] = new KeyValuePair<string, VToken>(property.Key, property.Value);
-        }
-
-        bool ICollection<KeyValuePair<string, VToken>>.IsReadOnly => false;
-
-        bool ICollection<KeyValuePair<string, VToken>>.Remove(KeyValuePair<string, VToken> item)
-        {
-            if (!((ICollection<KeyValuePair<string, VToken>>) this).Contains(item))
-                return false;
-
-            ((IDictionary<string, VToken>) this).Remove(item.Key);
             return true;
         }
 
-        #endregion
-
-        protected override bool DeepEquals(VToken token)
+        public override bool TrySetMember(VObject instance, SetMemberBinder binder, object? value)
         {
-            if (!(token is VObject otherObj))
-                return false;
-
-            return (_children.Count == otherObj._children.Count && Enumerable.Range(0, _children.Count).All(x => VToken.DeepEquals(_children[x], otherObj._children[x])));
+            VToken v = value is VToken token ? token : new VValue(value);
+            instance[binder.Name] = v;
+            return true;
         }
 
-        protected override DynamicMetaObject GetMetaObject(Expression parameter)
-        {
-            return new DynamicProxyMetaObject<VObject>(parameter, this, new VObjectDynamicProxy());
-        }
-
-        private class VObjectDynamicProxy : DynamicProxy<VObject>
-        {
-            public override bool TryGetMember(VObject instance, GetMemberBinder binder, out object? result)
-            {
-                // result can be null
-                result = instance[binder.Name];
-                return true;
-            }
-
-            public override bool TrySetMember(VObject instance, SetMemberBinder binder, object value)
-            {
-                // this can throw an error if value isn't a valid for a JValue
-                if (!(value is VToken v))
-                    v = new VValue(value);
-
-                instance[binder.Name] = v;
-                return true;
-            }
-
-            public override IEnumerable<string> GetDynamicMemberNames(VObject instance)
-            {
-                return instance.Properties().Select(p => p.Key);
-            }
-        }
+        public override IEnumerable<string> GetDynamicMemberNames(VObject instance)
+            => instance.Properties().Select(p => p.Key);
     }
+}
+
+internal class EnumerableCollection<T>(IEnumerable<T> source) : ICollection<T>
+{
+    private readonly IEnumerable<T> _source = source ?? throw new ArgumentNullException(nameof(source));
+
+    public int Count => _source.Count();
+    public bool IsReadOnly => true;
+
+    public void Add(T item) => throw new NotSupportedException("Collection is read-only.");
+    public void Clear() => throw new NotSupportedException("Collection is read-only.");
+    public bool Remove(T item) => throw new NotSupportedException("Collection is read-only.");
+
+    public bool Contains(T item) => _source.Contains(item);
+    public void CopyTo(T[] array, int arrayIndex) => _source.ToList().CopyTo(array, arrayIndex);
+
+    public IEnumerator<T> GetEnumerator() => _source.GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

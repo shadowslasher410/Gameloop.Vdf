@@ -1,85 +1,70 @@
-﻿using Gameloop.Vdf.Utilities;
-using System;
-using System.Collections.Generic;
-using System.Globalization;
+﻿using System.Globalization;
 
-namespace Gameloop.Vdf.Linq
+namespace Gameloop.Vdf.Linq;
+
+public static class Extensions
 {
-    public static class Extensions
+
+    public static TU? Value<TU>(this IEnumerable<VToken> value)
+        => value.Value<VToken, TU>();
+
+    public static TU? Value<T, TU>(this IEnumerable<T> value) where T : VToken
     {
-        public static U Value<U>(this IEnumerable<VToken> value)
-        {
-            return value.Value<VToken, U>();
-        }
+        ArgumentNullException.ThrowIfNull(value);
 
-        public static U Value<T, U>(this IEnumerable<T> value) where T : VToken
-        {
-            ValidationUtils.ArgumentNotNull(value, nameof(value));
-
-            if (!(value is VToken token))
-                throw new ArgumentException("Source value must be a JToken.");
-
-            return token.Convert<VToken, U>();
-        }
-
-        internal static U Convert<T, U>(this T token) where T : VToken
-        {
-            if (token == null)
-                return default(U);
-
-            if (token is U
-                // don't want to cast JValue to its interfaces, want to get the internal value
-                && typeof(U) != typeof(IComparable) && typeof(U) != typeof(IFormattable))
-            {
-                // HACK
-                return (U) (object) token;
-            }
-            else
-            {
-                VValue value = token as VValue;
-                if (value == null)
-                    throw new InvalidCastException($"Cannot cast {token.GetType()} to {typeof(T)}.");
-
-                if (value.Value is U u)
-                    return u;
-
-                Type targetType = typeof(U);
-
-                if (ReflectionUtils.IsNullableType(targetType))
-                {
-                    if (value.Value == null)
-                        return default(U);
-
-                    targetType = Nullable.GetUnderlyingType(targetType);
-                }
-
-                if (TryConvertVdf<U>(value.Value, out U resultObj))
-                    return resultObj;
-
-                return (U) System.Convert.ChangeType(value.Value, targetType, CultureInfo.InvariantCulture);
-            }
-        }
-
-        private static bool TryConvertVdf<U>(object value, out U result)
-        {
-            result = default(U);
-
-            // It won't be null at this point, so just handle the nullable type.
-            if ((typeof(U) == typeof(bool) || Nullable.GetUnderlyingType(typeof(U)) == typeof(bool)) && value is string valueString)
-            {
-                switch (valueString)
-                {
-                    case "1":
-                        result = (U) (object) true;
-                        return true;
-
-                    case "0":
-                        result = (U) (object) false;
-                        return true;
-                }
-            }
-
-            return false;
-        }
+        return value.FirstOrDefault().Convert<T, TU>();
     }
+    public static TU? Value<TU>(this VToken? token)
+        => token.Convert<VToken, TU>();
+
+    internal static TU? Convert<T, TU>(this T? token) where T : VToken
+    {
+        if (token is null) return default;
+
+        Type typeU = typeof(TU);
+        if (token is TU result && typeU != typeof(IComparable) && typeU != typeof(IFormattable))
+            return result;
+
+        if (token is not VValue vValue)
+            throw new InvalidCastException($"Cannot cast {token.GetType().Name} to {typeof(T).Name}.");
+
+        if (vValue.Value is TU directMatch)
+            return directMatch;
+
+        Type? underlyingType = Nullable.GetUnderlyingType(typeU);
+        Type targetType = underlyingType ?? typeU;
+
+        if (underlyingType != null && vValue.Value is null)
+            return default;
+
+        if (TryConvertVdf(vValue.Value, out TU? resultObj))
+            return resultObj;
+
+        return (TU?)System.Convert.ChangeType(vValue.Value, targetType, CultureInfo.InvariantCulture);
+    }
+
+    private static bool TryConvertVdf<TU>(object? value, out TU? result)
+    {
+        result = default;
+
+        Type typeU = typeof(TU);
+        if (typeU == typeof(bool) || Nullable.GetUnderlyingType(typeU) == typeof(bool))
+        {
+            if (value is "1")
+            {
+                result = (TU)(object)true;
+                return true;
+            }
+            if (value is "0")
+            {
+                result = (TU)(object)false;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static string? ToLowerSafe(this string? value)
+        => value?.ToLowerInvariant();
 }

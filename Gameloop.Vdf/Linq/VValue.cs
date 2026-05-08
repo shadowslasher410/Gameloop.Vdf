@@ -1,60 +1,38 @@
-﻿using System;
+﻿namespace Gameloop.Vdf.Linq;
 
-namespace Gameloop.Vdf.Linq
+public class VValue(object? value, VTokenType type = VTokenType.Value) : VToken
 {
-    public class VValue : VToken
+    public object? Value { get; set; } = value;
+
+    public override VTokenType Type => type;
+
+    public string? TypeHint
     {
-        private readonly VTokenType _tokenType;
-        public object? Value { get; set; }
+        get => field;
+        set => field = value?.ToLowerInvariant();
+    }
 
-        private VValue(object? value, VTokenType type)
-        {
-            Value = value;
-            _tokenType = type;
-        }
+    public override VToken DeepClone() => new VValue(Value, Type) { TypeHint = TypeHint };
 
-        public VValue(object? value)
-            : this(value, VTokenType.Value) { }
+    public override void WriteTo(VdfWriter writer)
+    {
+        if (Type == VTokenType.Comment)
+            writer.WriteComment(Value?.ToString() ?? string.Empty);
+        else
+            writer.WriteValue(this);
+    }
 
-        public VValue(VValue other)
-            : this(other.Value, other.Type) { }
+    public override string ToString() => Value?.ToString() ?? string.Empty;
 
-        public override VTokenType Type => _tokenType;
+    public static VValue CreateComment(string value) => new(value, VTokenType.Comment);
+    public static VValue CreateEmpty() => new(string.Empty);
 
-        public override VToken DeepClone()
-        {
-            return new VValue(this);
-        }
+    protected override bool DeepEquals(VToken token)
+    {
+        if (token is not VValue other) return false;
 
-        public override void WriteTo(VdfWriter writer)
-        {
-            if (_tokenType == VTokenType.Comment)
-                writer.WriteComment(ToString());
-            else
-                writer.WriteValue(this);
-        }
-
-        public override string ToString()
-        {
-            return Value?.ToString() ?? String.Empty;
-        }
-
-        public static VValue CreateComment(string value)
-        {
-            return new VValue(value, VTokenType.Comment);
-        }
-
-        public static VValue CreateEmpty()
-        {
-            return new VValue(String.Empty);
-        }
-
-        protected override bool DeepEquals(VToken token)
-        {
-            if (!(token is VValue otherVal))
-                return false;
-
-            return (this == otherVal || (Type == otherVal.Type && Value != null && Value.Equals(otherVal.Value)));
-        }
+        return Type == other.Type &&
+               Equals(Value?.ToString(), other.Value?.ToString()) &&
+               TypeHint == other.TypeHint;
     }
 }
