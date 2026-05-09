@@ -2,8 +2,16 @@
 
 namespace Gameloop.Vdf.Linq;
 
+/// <summary>
+/// Initializes a new instance of the <see cref="VConditional"/> class.
+/// </summary>
+/// <remarks>
+/// VDF conditionals are typically used for platform-specific property inclusion, 
+/// such as <c>[$WIN32]</c> or <c>[$POSIX]</c>.
+/// </remarks>
 public class VConditional() : VToken
 {
+    /// <summary>Commonly used VDF conditional platform constants.</summary>
     public const string Linux = "LINUX",
                         OsX = "OSX",
                         Posix = "POSIX",
@@ -17,11 +25,18 @@ public class VConditional() : VToken
                         XboxOne = "XB1",
                         XboxSeriesX = "XBSX";
 
+    /// <summary>
+    /// The internal list of <see cref="Token"/> components that make up the conditional expression.
+    /// </summary>
     private readonly List<Token> _tokens = [];
 
+    /// <inheritdoc />
     public override VTokenType Type => VTokenType.Conditional;
+
+    /// <summary>Gets the sequence of <see cref="Token"/> items that form this conditional expression.</summary>
     public IReadOnlyList<Token> Tokens => _tokens;
 
+    /// <inheritdoc />
     public override VToken DeepClone()
     {
         VConditional newCond = [];
@@ -31,8 +46,10 @@ public class VConditional() : VToken
         return newCond;
     }
 
+    /// <inheritdoc />
     public override void WriteTo(VdfWriter writer) => writer.WriteConditional(_tokens);
 
+    /// <inheritdoc />
     protected override bool DeepEquals(VToken token)
     {
         if (token is not VConditional other) return false;
@@ -41,8 +58,16 @@ public class VConditional() : VToken
             EqualityComparer<Token>.Create((t1, t2) => Token.DeepEquals(t1, t2)));
     }
 
+    /// <summary>Adds a <see cref="Token"/> to the conditional expression.</summary>
+    /// <param name="token">The token to add.</param>
     public void Add(Token token) => _tokens.Add(token);
 
+    /// <summary>
+    /// Evaluates the conditional expression against a list of defined platform/environment strings.
+    /// </summary>
+    /// <param name="definedConditionals">A list of strings representing the currently active conditions (e.g., ["WIN32"]).</param>
+    /// <returns><c>true</c> if the expression evaluates to true; otherwise, <c>false</c>.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if the expression contains an unexpected token sequence.</exception>
     public bool Evaluate(IReadOnlyList<string> definedConditionals)
     {
         int index = 0;
@@ -83,16 +108,42 @@ public class VConditional() : VToken
         return runningResult;
     }
 
+    /// <summary>
+    /// Represents a single unit in a conditional expression, such as a constant, an operator, or a modifier.
+    /// </summary>
+    /// <param name="tokenType">The type of the token.</param>
+    /// <param name="name">The name of the constant (only applicable for <see cref="TokenType.Constant"/>).</param>
     public readonly struct Token(VConditional.TokenType tokenType, string? name = null)
     {
+        /// <summary>Gets the type of this token.</summary>
         public TokenType TokenType { get; } = tokenType;
+
+        /// <summary>Gets the name of the constant value, if applicable.</summary>
         public string? Name { get; } = name;
 
+        /// <summary>Creates a deep copy of the current token.</summary>
         public Token DeepClone() => new(TokenType, Name);
 
+        /// <summary>Determines if two tokens are identical in type and name.</summary>
         public static bool DeepEquals(Token t1, Token t2)
             => t1.TokenType == t2.TokenType && t1.Name == t2.Name;
     }
 
-    public enum TokenType { Constant, Not, Or, And }
+    /// <summary>
+    /// Specifies the grammar types allowed within a VDF conditional expression.
+    /// </summary>
+    public enum TokenType 
+    {
+        /// <summary>A platform or environment key (e.g., "WIN32").</summary>
+        Constant,
+
+        /// <summary>The logical NOT operator (!).</summary>
+        Not,
+
+        /// <summary>The logical OR operator (||).</summary>
+        Or,
+
+        /// <summary>The logical AND operator (&amp;&amp;).</summary>
+        And
+    }
 }

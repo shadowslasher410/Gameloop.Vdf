@@ -3,17 +3,40 @@ using Gameloop.Vdf.Linq;
 
 namespace Gameloop.Vdf;
 
+/// <summary>
+/// Initializes a new instance of the <see cref="VdfTextWriter"/> class with a specified <see cref="TextWriter"/> and <see cref="VdfSerializerSettings"/>.
+/// </summary>
+/// <param name="writer">The <see cref="TextWriter"/> to which the VDF data will be written.</param>
+/// <param name="settings">The <see cref="VdfSerializerSettings"/> used to configure the writer's behavior.</param>
 public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : VdfWriter(settings)
 {
+    /// <summary>
+    /// Optimized search values for identifying characters that require VDF escape sequences.
+    /// </summary>
     private static readonly SearchValues<char> EscapableChars = SearchValues.Create(
         ['\n', '\t', '\v', '\b', '\r', '\f', '\a', '\\', '?', '\'', '\"']);
 
+    /// <summary>
+    /// The underlying <see cref="TextWriter"/> used to output the VDF data.
+    /// </summary>
+    /// <remarks>
+    /// This field is initialized from the primary constructor and its disposal 
+    /// is managed based on the <see cref="VdfWriter.CloseOutput"/> setting.
+    /// </remarks>
     private readonly TextWriter _writer = writer ?? throw new ArgumentNullException(nameof(writer));
 
+    /// <summary>
+    /// Gets or sets the current indentation depth used for pretty-printing the VDF output.
+    /// </summary>
     private int IndentationLevel { get; set; } = 0;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VdfTextWriter"/> class using default settings.
+    /// </summary>
+    /// <param name="writer">The <see cref="TextWriter"/> to write to.</param>
     public VdfTextWriter(TextWriter writer) : this(writer, VdfSerializerSettings.Default) { }
 
+    /// <inheritdoc />
     public override void WriteKey(string key)
     {
         AutoComplete(State.Key);
@@ -22,12 +45,15 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         _writer.Write(VdfStructure.Quote);
     }
 
+    /// <inheritdoc />
     public override void WriteValue(VValue value) => WriteValue(value.ToString(), value.TypeHint);
 
+    /// <inheritdoc />
     public override void WriteValue(string value, string? typeHint = null)
     {
         AutoComplete(State.Value);
 
+        // KV3 supports type hinting (e.g., boolean:"1")
         if (Settings.Format == KeyValuesFormat.Kv3 && !string.IsNullOrEmpty(typeHint))
         {
             _writer.Write(typeHint);
@@ -39,6 +65,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         _writer.Write(VdfStructure.Quote);
     }
 
+    /// <inheritdoc />
     public override void WriteArrayStart()
     {
         AutoComplete(State.ArrayStart);
@@ -46,6 +73,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         IndentationLevel++;
     }
 
+    /// <inheritdoc />
     public override void WriteArrayEnd()
     {
         IndentationLevel--;
@@ -53,6 +81,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         _writer.Write(VdfStructure.ArrayEnd);
     }
 
+    /// <inheritdoc />
     public override void WriteObjectStart()
     {
         AutoComplete(State.ObjectStart);
@@ -60,6 +89,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         IndentationLevel++;
     }
 
+    /// <inheritdoc />
     public override void WriteObjectEnd()
     {
         IndentationLevel--;
@@ -70,6 +100,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
             AutoComplete(State.Finished);
     }
 
+    /// <inheritdoc />
     public override void WriteComment(string text)
     {
         AutoComplete(State.Comment);
@@ -78,6 +109,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         _writer.Write(text);
     }
 
+    /// <inheritdoc />
     public override void WriteConditional(IReadOnlyList<VConditional.Token> tokens)
     {
         AutoComplete(State.Conditional);
@@ -108,6 +140,11 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         _writer.Write(VdfStructure.ConditionalEnd);
     }
 
+
+    /// <summary>
+    /// Automatically manages transitions between states, handling whitespace, indentation, and newlines.
+    /// </summary>
+    /// <param name="next">The state to transition to.</param>
     private void AutoComplete(State next)
     {
         if (CurrentState == State.Start)
@@ -119,11 +156,13 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         switch (next)
         {
             case State.Value or State.Conditional:
+                // Separate keys from values/conditionals with a space
                 _writer.Write(VdfStructure.Assign);
                 break;
 
             case State.Key or State.ObjectStart or State.ObjectEnd or
                  State.ArrayStart or State.ArrayEnd or State.Comment:
+                // New lines for structural elements with current indentation
                 _writer.WriteLine();
                 _writer.Write(new string(VdfStructure.Indent, IndentationLevel));
                 break;
@@ -136,6 +175,10 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         CurrentState = next;
     }
 
+    /// <summary>
+    /// Writes a string to the output, escaping special characters based on <see cref="VdfSerializerSettings.UsesEscapeSequences"/>.
+    /// </summary>
+    /// <param name="str">The string to escape and write.</param>
     private void WriteEscapedString(string str)
     {
         if (!Settings.UsesEscapeSequences)
@@ -162,12 +205,14 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         }
     }
 
+    /// <inheritdoc />
     public override void Close()
     {
         base.Close();
         if (CloseOutput) _writer.Dispose();
     }
 
+    /// <inheritdoc />
     public override async Task WriteKeyAsync(string key)
     {
         await AutoCompleteAsync(State.Key);
@@ -176,6 +221,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         await _writer.WriteAsync(VdfStructure.Quote);
     }
 
+    /// <inheritdoc />
     public override async Task WriteValueAsync(string value, string? typeHint = null)
     {
         await AutoCompleteAsync(State.Value);
@@ -191,6 +237,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         await _writer.WriteAsync(VdfStructure.Quote);
     }
 
+    /// <inheritdoc />
     public override async Task WriteObjectStartAsync()
     {
         await AutoCompleteAsync(State.ObjectStart);
@@ -198,6 +245,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         IndentationLevel++;
     }
 
+    /// <inheritdoc />
     public override async Task WriteObjectEndAsync()
     {
         IndentationLevel--;
@@ -208,6 +256,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
             await AutoCompleteAsync(State.Finished);
     }
 
+    /// <inheritdoc />
     public override async Task WriteCommentAsync(string text)
     {
         await AutoCompleteAsync(State.Comment);
@@ -216,6 +265,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         await _writer.WriteAsync(text);
     }
 
+    /// <inheritdoc />
     public override async Task WriteArrayStartAsync()
     {
         await AutoCompleteAsync(State.ArrayStart);
@@ -223,6 +273,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         IndentationLevel++;
     }
 
+    /// <inheritdoc />
     public override async Task WriteArrayEndAsync()
     {
         IndentationLevel--;
@@ -230,6 +281,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         await _writer.WriteAsync(VdfStructure.ArrayEnd);
     }
 
+    /// <inheritdoc />
     public override async Task WriteConditionalAsync(IReadOnlyList<VConditional.Token> tokens)
     {
         await AutoCompleteAsync(State.Conditional);
@@ -258,6 +310,11 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         await _writer.WriteAsync(VdfStructure.ConditionalEnd);
     }
 
+    /// <summary>
+    /// Asynchronously manages transitions between states, handling whitespace, indentation, and newlines.
+    /// </summary>
+    /// <param name="next">The state to transition to.</param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
     private async Task AutoCompleteAsync(State next)
     {
         if (CurrentState == State.Start)
@@ -286,6 +343,11 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         CurrentState = next;
     }
 
+    /// <summary>
+    /// Asynchronously writes a string to the output, escaping special characters based on <see cref="VdfSerializerSettings.UsesEscapeSequences"/>.
+    /// </summary>
+    /// <param name="str">The string to escape and write.</param>
+    /// <returns>A task that represents the asynchronous write operation.</returns>
     private async Task WriteEscapedStringAsync(string str)
     {
         if (!Settings.UsesEscapeSequences)
@@ -317,6 +379,7 @@ public class VdfTextWriter(TextWriter writer, VdfSerializerSettings settings) : 
         }
     }
 
+    /// <inheritdoc />
     protected override async ValueTask DisposeAsyncCore()
     {
         if (CloseOutput) await _writer.DisposeAsync();
